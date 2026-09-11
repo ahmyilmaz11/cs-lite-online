@@ -4,15 +4,16 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
-const WORLD = { w: 1200, h: 700 };
+const WORLD = {w: 1800, h: 1100};
 
 const WALLS = [
-  {x:120,y:84,w:336,h:39},{x:624,y:70,w:408,h:39},
-  {x:96,y:245,w:66,h:280},{x:312,y:196,w:66,h:231},
-  {x:504,y:154,w:66,h:196},{x:720,y:224,w:66,h:294},
-  {x:936,y:168,w:66,h:196},{x:888,y:476,w:216,h:39},
-  {x:240,y:532,w:360,h:39},{x:504,y:385,w:192,h:39},
-  {x:144,y:406,w:168,h:39},{x:936,y:350,w:144,h:39}
+  {x:180,y:120,w:520,h:55},{x:920,y:100,w:600,h:55},
+  {x:120,y:350,w:70,h:520},{x:390,y:280,w:70,h:350},
+  {x:680,y:220,w:70,h:320},{x:1020,y:320,w:70,h:520},
+  {x:1380,y:250,w:70,h:330},{x:1320,y:790,w:300,h:55},
+  {x:300,y:880,w:520,h:55},{x:690,y:590,w:280,h:55},
+  {x:180,y:640,w:250,h:55},{x:1370,y:560,w:220,h:55},
+  {x:1180,y:160,w:55,h:190},{x:500,y:480,w:210,h:55}
 ];
 
 const rooms = new Map();
@@ -21,282 +22,208 @@ function roomOf(code) {
   if (!rooms.has(code)) rooms.set(code, {
     players: new Map(),
     bullets: [],
-    killfeed: [],
-    round: 1,
+    feed: [],
+    seq: 1,
     lastActivity: Date.now()
   });
   return rooms.get(code);
 }
 
-function json(res, status, body) {
-  const data = Buffer.from(JSON.stringify(body));
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': data.length,
-    'Cache-Control': 'no-store'
+function cleanName(v) {
+  return String(v||'Player').replace(/[<>]/g,'').trim().slice(0,18) || 'Player';
+}
+function cleanRoom(v) {
+  return String(v||'MAIN').replace(/[^a-zA-Z0-9_-]/g,'').toUpperCase().slice(0,12) || 'MAIN';
+}
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+
+function json(res,status,obj){
+  const data=Buffer.from(JSON.stringify(obj));
+  res.writeHead(status,{
+    'Content-Type':'application/json; charset=utf-8',
+    'Content-Length':data.length,
+    'Cache-Control':'no-store'
   });
   res.end(data);
 }
-
-function text(res, status, body, type='text/plain; charset=utf-8') {
-  const data = Buffer.from(body);
-  res.writeHead(status, {'Content-Type': type, 'Content-Length': data.length});
+function text(res,status,body,type='text/plain; charset=utf-8'){
+  const data=Buffer.from(body);
+  res.writeHead(status,{'Content-Type':type,'Content-Length':data.length});
   res.end(data);
 }
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let s = '';
-    req.on('data', d => {
-      s += d;
-      if (s.length > 100000) req.destroy();
-    });
-    req.on('end', () => {
-      try { resolve(s ? JSON.parse(s) : {}); }
-      catch(e) { reject(e); }
-    });
+function body(req){
+  return new Promise((resolve,reject)=>{
+    let s='';
+    req.on('data',d=>{s+=d;if(s.length>50000) req.destroy();});
+    req.on('end',()=>{try{resolve(s?JSON.parse(s):{})}catch(e){reject(e)}});
   });
 }
-
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-
-function circleWall(x,y,r=10) {
-  for (const a of WALLS) {
-    const cx = Math.max(a.x, Math.min(x, a.x+a.w));
-    const cy = Math.max(a.y, Math.min(y, a.y+a.h));
-    const dx=x-cx, dy=y-cy;
-    if (dx*dx+dy*dy < r*r) return true;
+function circleWall(x,y,r=14){
+  for(const a of WALLS){
+    const cx=Math.max(a.x,Math.min(x,a.x+a.w));
+    const cy=Math.max(a.y,Math.min(y,a.y+a.h));
+    const dx=x-cx,dy=y-cy;
+    if(dx*dx+dy*dy<r*r)return true;
   }
   return false;
 }
-
-function spawn(room, team) {
-  const starts = team === 'CT'
-    ? [[180,140],[210,650],[420,650],[150,620]]
-    : [[1040,610],[1040,120],[830,610],[1080,300]];
-  for (let i=0;i<20;i++) {
-    const p = starts[Math.floor(Math.random()*starts.length)];
-    const x = p[0] + (Math.random()-.5)*35;
-    const y = p[1] + (Math.random()-.5)*35;
-    if (!circleWall(x,y,12)) return {x,y};
+function spawn(room,team){
+  const list=team==='CT'
+    ? [[230,230],[300,1020],[540,1010],[260,520]]
+    : [[1610,970],[1600,190],[1260,970],[1650,520]];
+  for(let i=0;i<30;i++){
+    const b=list[Math.floor(Math.random()*list.length)];
+    const x=b[0]+(Math.random()-.5)*70,y=b[1]+(Math.random()-.5)*70;
+    if(!circleWall(x,y,16)) return {x,y};
   }
-  return {x:200,y:150};
+  return {x:250,y:220};
 }
-
-function cleanName(v) {
-  return String(v || 'Player').replace(/[<>]/g,'').trim().slice(0,18) || 'Player';
+function addFeed(room,msg){
+  room.feed.push({id:room.seq++,msg,t:Date.now()});
+  if(room.feed.length>24) room.feed.shift();
 }
-function cleanRoom(v) {
-  return String(v || 'MAIN').replace(/[^a-zA-Z0-9_-]/g,'').toUpperCase().slice(0,12) || 'MAIN';
-}
-
-function publicState(room, token) {
-  const me = room.players.get(token);
+function state(room,token){
+  const me=room.players.get(token);
   return {
     ok:true,
-    world: WORLD,
-    walls: WALLS,
-    round: room.round,
-    me: me ? {
-      id:me.id,name:me.name,team:me.team,x:me.x,y:me.y,angle:me.angle,
-      hp:me.hp,kills:me.kills,deaths:me.deaths,ammo:me.ammo,reserve:me.reserve,
-      alive:me.alive,respawnAt:me.respawnAt
-    } : null,
-    players:[...room.players.values()].map(p => ({
-      id:p.id,name:p.name,team:p.team,x:p.x,y:p.y,angle:p.angle,
-      hp:p.hp,kills:p.kills,deaths:p.deaths,alive:p.alive
+    ts:Date.now(),
+    world:WORLD,
+    walls:WALLS,
+    me:me?{
+      id:me.id,n:me.name,t:me.team,x:Math.round(me.x),y:Math.round(me.y),
+      a:+me.angle.toFixed(3),h:me.hp,k:me.kills,d:me.deaths,
+      m:me.ammo,r:me.reserve,v:me.alive,resp:me.respawnAt
+    }:null,
+    p:[...room.players.values()].map(p=>({
+      id:p.id,n:p.name,t:p.team,x:Math.round(p.x),y:Math.round(p.y),
+      a:+p.angle.toFixed(3),h:p.hp,k:p.kills,d:p.deaths,v:p.alive
     })),
-    bullets: room.bullets.map(b => ({id:b.id,x:b.x,y:b.y,team:b.team})),
-    killfeed: room.killfeed.slice(-6)
+    b:room.bullets.map(b=>({id:b.id,x:Math.round(b.x),y:Math.round(b.y),t:b.team})),
+    f:room.feed.slice(-6)
   };
 }
 
-function addFeed(room, text) {
-  room.killfeed.push({text, t:Date.now()});
-  if (room.killfeed.length > 20) room.killfeed.shift();
-}
-
-function serveStatic(req,res) {
-  let url = decodeURIComponent(req.url.split('?')[0]);
-  if (url === '/') url = '/index.html';
-  const file = path.join(__dirname, 'public', url);
-  const base = path.join(__dirname,'public');
-  if (!file.startsWith(base)) return text(res,403,'Forbidden');
-  fs.readFile(file,(err,data)=>{
-    if(err) return text(res,404,'Not found');
-    const ext = path.extname(file).toLowerCase();
-    const mime = {
-      '.html':'text/html; charset=utf-8',
-      '.js':'text/javascript; charset=utf-8',
-      '.css':'text/css; charset=utf-8',
-      '.json':'application/json; charset=utf-8'
-    }[ext] || 'application/octet-stream';
-    res.writeHead(200, {'Content-Type':mime, 'Cache-Control':'no-cache'});
-    res.end(data);
+function serve(req,res){
+  let u=decodeURIComponent(req.url.split('?')[0]);
+  if(u==='/')u='/index.html';
+  const base=path.join(__dirname,'public');
+  const file=path.join(base,u);
+  if(!file.startsWith(base))return text(res,403,'Forbidden');
+  fs.readFile(file,(e,d)=>{
+    if(e)return text(res,404,'Not found');
+    const ext=path.extname(file);
+    const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8'}[ext]||'application/octet-stream';
+    res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-cache'});
+    res.end(d);
   });
 }
 
-const server = http.createServer(async (req,res)=>{
-  try {
-    if (req.method === 'GET' && req.url.startsWith('/api/health')) {
-      return json(res,200,{ok:true,rooms:rooms.size});
-    }
+const server=http.createServer(async(req,res)=>{
+  try{
+    if(req.method==='GET'&&req.url.startsWith('/api/health')) return json(res,200,{ok:true,rooms:rooms.size});
 
-    if (req.method === 'POST' && req.url.startsWith('/api/join')) {
-      const body = await readBody(req);
-      const code = cleanRoom(body.room);
-      const room = roomOf(code);
-      room.lastActivity = Date.now();
-
-      const ct = [...room.players.values()].filter(p=>p.team==='CT').length;
-      const t = [...room.players.values()].filter(p=>p.team==='T').length;
-      const team = ct <= t ? 'CT' : 'T';
-      const pos = spawn(room, team);
-      const token = crypto.randomBytes(16).toString('hex');
-      const p = {
-        id:crypto.randomBytes(5).toString('hex'),
-        token,
-        name:cleanName(body.name),
-        team,
-        x:pos.x,y:pos.y,angle:0,hp:100,kills:0,deaths:0,
-        ammo:30,reserve:90,alive:true,respawnAt:0,
-        lastSeen:Date.now(),lastShot:0,lastMove:Date.now()
+    if(req.method==='POST'&&req.url.startsWith('/api/join')){
+      const b=await body(req), code=cleanRoom(b.room), room=roomOf(code);
+      const ct=[...room.players.values()].filter(x=>x.team==='CT').length;
+      const tt=[...room.players.values()].filter(x=>x.team==='T').length;
+      const team=ct<=tt?'CT':'T', pos=spawn(room,team), token=crypto.randomBytes(16).toString('hex');
+      const p={
+        id:crypto.randomBytes(5).toString('hex'),name:cleanName(b.name),team,
+        x:pos.x,y:pos.y,angle:0,hp:100,kills:0,deaths:0,ammo:30,reserve:90,
+        alive:true,respawnAt:0,lastSeen:Date.now(),lastMove:Date.now(),lastShot:0
       };
-      room.players.set(token,p);
-      addFeed(room, `${p.name} joined ${team}`);
+      room.players.set(token,p);room.lastActivity=Date.now();
+      addFeed(room,`${p.name} joined ${team}`);
       return json(res,200,{ok:true,token,room:code,team});
     }
 
-    if (req.method === 'POST' && req.url.startsWith('/api/update')) {
-      const b = await readBody(req);
-      const room = roomOf(cleanRoom(b.room));
-      const p = room.players.get(String(b.token||''));
-      if (!p) return json(res,401,{ok:false,error:'session'});
-      p.lastSeen = Date.now(); room.lastActivity = Date.now();
-
-      if (p.alive) {
-        const nx = clamp(Number(b.x)||p.x, 12, WORLD.w-12);
-        const ny = clamp(Number(b.y)||p.y, 12, WORLD.h-12);
-        const now = Date.now();
-        const dt = Math.max(0.05, Math.min(1.0, (now-p.lastMove)/1000));
-        const maxStep = 260*dt + 30;
-        const dx=nx-p.x,dy=ny-p.y,d=Math.hypot(dx,dy);
-        if (d <= maxStep && !circleWall(nx,ny,12)) {
-          p.x=nx;p.y=ny;
-        }
-        p.angle = Number.isFinite(Number(b.angle)) ? Number(b.angle) : p.angle;
-        p.lastMove = now;
+    if(req.method==='POST'&&req.url.startsWith('/api/u')){
+      const b=await body(req), room=roomOf(cleanRoom(b.room)), p=room.players.get(String(b.token||''));
+      if(!p)return json(res,401,{ok:false});
+      const now=Date.now(); p.lastSeen=now;room.lastActivity=now;
+      if(p.alive){
+        const nx=clamp(Number(b.x)||p.x,16,WORLD.w-16),ny=clamp(Number(b.y)||p.y,16,WORLD.h-16);
+        const dt=Math.max(.06,Math.min(1,(now-p.lastMove)/1000)), max=270*dt+34;
+        if(Math.hypot(nx-p.x,ny-p.y)<=max&&!circleWall(nx,ny,16)){p.x=nx;p.y=ny;}
+        if(Number.isFinite(Number(b.a)))p.angle=Number(b.a);
+        p.lastMove=now;
       }
-
       return json(res,200,{ok:true});
     }
 
-    if (req.method === 'POST' && req.url.startsWith('/api/shoot')) {
-      const b = await readBody(req);
-      const room = roomOf(cleanRoom(b.room));
-      const p = room.players.get(String(b.token||''));
-      if (!p) return json(res,401,{ok:false,error:'session'});
-      p.lastSeen=Date.now(); room.lastActivity=Date.now();
-      const now=Date.now();
-
-      if (!p.alive || p.ammo<=0 || now-p.lastShot < 115) return json(res,200,{ok:false});
+    if(req.method==='POST'&&req.url.startsWith('/api/fire')){
+      const b=await body(req),room=roomOf(cleanRoom(b.room)),p=room.players.get(String(b.token||''));
+      if(!p)return json(res,401,{ok:false});
+      const now=Date.now();p.lastSeen=now;
+      if(!p.alive||p.ammo<=0||now-p.lastShot<125)return json(res,200,{ok:false});
       p.lastShot=now;p.ammo--;
-
-      const angle = Number.isFinite(Number(b.angle)) ? Number(b.angle) : p.angle;
-      const spread = (Math.random()-.5)*0.035;
-      const a = angle + spread;
-      const speed = 1100;
+      const a=(Number.isFinite(Number(b.a))?Number(b.a):p.angle)+(Math.random()-.5)*.028;
+      const sp=1250;
       room.bullets.push({
-        id:crypto.randomBytes(6).toString('hex'), owner:p.id, team:p.team,
-        x:p.x+Math.cos(a)*18, y:p.y+Math.sin(a)*18,
-        vx:Math.cos(a)*speed, vy:Math.sin(a)*speed,
-        life:1.65
+        id:room.seq++,owner:p.id,team:p.team,x:p.x+Math.cos(a)*24,y:p.y+Math.sin(a)*24,
+        vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1.8
       });
-
-      return json(res,200,{ok:true,ammo:p.ammo});
+      return json(res,200,{ok:true,m:p.ammo});
     }
 
-    if (req.method === 'POST' && req.url.startsWith('/api/reload')) {
-      const b = await readBody(req);
-      const room = roomOf(cleanRoom(b.room));
-      const p = room.players.get(String(b.token||''));
-      if (!p) return json(res,401,{ok:false,error:'session'});
-      if (!p.alive || p.ammo>=30 || p.reserve<=0) return json(res,200,{ok:false});
-
-      const need=Math.min(30-p.ammo,p.reserve);
-      p.reserve-=need;p.ammo+=need;
-      return json(res,200,{ok:true,ammo:p.ammo,reserve:p.reserve});
+    if(req.method==='POST'&&req.url.startsWith('/api/reload')){
+      const b=await body(req),room=roomOf(cleanRoom(b.room)),p=room.players.get(String(b.token||''));
+      if(!p)return json(res,401,{ok:false});
+      if(!p.alive||p.ammo>=30||p.reserve<=0)return json(res,200,{ok:false});
+      const n=Math.min(30-p.ammo,p.reserve);p.ammo+=n;p.reserve-=n;
+      return json(res,200,{ok:true,m:p.ammo,r:p.reserve});
     }
 
-    if (req.method === 'GET' && req.url.startsWith('/api/state')) {
-      const u = new URL(req.url, 'http://localhost');
-      const room = roomOf(cleanRoom(u.searchParams.get('room')));
-      const token = u.searchParams.get('token') || '';
-      const p = room.players.get(token);
-      if (!p) return json(res,401,{ok:false,error:'session'});
+    if(req.method==='GET'&&req.url.startsWith('/api/s')){
+      const u=new URL(req.url,'http://x');
+      const room=roomOf(cleanRoom(u.searchParams.get('room'))),token=u.searchParams.get('token')||'';
+      const p=room.players.get(token);
+      if(!p)return json(res,401,{ok:false});
       p.lastSeen=Date.now();room.lastActivity=Date.now();
-      return json(res,200,publicState(room,token));
+      return json(res,200,state(room,token));
     }
 
-    return serveStatic(req,res);
-  } catch(e) {
-    console.error(e);
-    return json(res,500,{ok:false,error:'server'});
+    return serve(req,res);
+  }catch(e){
+    console.error(e);return json(res,500,{ok:false});
   }
 });
 
 setInterval(()=>{
-  const now = Date.now();
-  for (const [code,room] of rooms) {
-    const dt = 0.02;
-
-    for (const p of room.players.values()) {
-      if (!p.alive && p.respawnAt && now >= p.respawnAt) {
-        const pos = spawn(room,p.team);
-        p.x=pos.x;p.y=pos.y;p.hp=100;p.ammo=30;p.reserve=90;p.alive=true;p.respawnAt=0;
+  const now=Date.now(),dt=.02;
+  for(const [code,room] of rooms){
+    for(const p of room.players.values()){
+      if(!p.alive&&p.respawnAt&&now>=p.respawnAt){
+        const s=spawn(room,p.team);
+        p.x=s.x;p.y=s.y;p.hp=100;p.ammo=30;p.reserve=90;p.alive=true;p.respawnAt=0;
       }
     }
-
-    for (const b of room.bullets) {
-      const oldx=b.x, oldy=b.y;
-      b.x += b.vx*dt; b.y += b.vy*dt; b.life -= dt;
-      if (b.life<=0 || b.x<0 || b.x>WORLD.w || b.y<0 || b.y>WORLD.h || circleWall(b.x,b.y,2)) {
-        b.life=0; continue;
-      }
-
-      for (const p of room.players.values()) {
-        if (!p.alive || p.id===b.owner || p.team===b.team) continue;
-        const vx=b.x-oldx, vy=b.y-oldy;
-        const wx=p.x-oldx, wy=p.y-oldy;
-        const vv=vx*vx+vy*vy || 1;
+    for(const b of room.bullets){
+      const ox=b.x,oy=b.y;
+      b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;
+      if(b.life<=0||b.x<0||b.x>WORLD.w||b.y<0||b.y>WORLD.h||circleWall(b.x,b.y,2)){b.life=0;continue;}
+      for(const p of room.players.values()){
+        if(!p.alive||p.id===b.owner||p.team===b.team)continue;
+        const vx=b.x-ox,vy=b.y-oy,wx=p.x-ox,wy=p.y-oy,vv=vx*vx+vy*vy||1;
         let t=(wx*vx+wy*vy)/vv;t=Math.max(0,Math.min(1,t));
-        const cx=oldx+t*vx, cy=oldy+t*vy;
-        if (Math.hypot(p.x-cx,p.y-cy) < 13) {
-          p.hp -= 34; b.life=0;
-          if (p.hp<=0) {
-            p.hp=0;p.alive=false;p.deaths++;p.respawnAt=now+2200;
+        if(Math.hypot(p.x-(ox+t*vx),p.y-(oy+t*vy))<16){
+          p.hp-=34;b.life=0;
+          if(p.hp<=0){
+            p.hp=0;p.alive=false;p.deaths++;p.respawnAt=now+1800;
             const killer=[...room.players.values()].find(x=>x.id===b.owner);
-            if (killer) {
-              killer.kills++;
-              addFeed(room, `${killer.name} → ${p.name}`);
-            }
+            if(killer){killer.kills++;addFeed(room,`${killer.name} → ${p.name}`);}
           }
           break;
         }
       }
     }
-    room.bullets = room.bullets.filter(b=>b.life>0);
-
-    for (const [token,p] of room.players) {
-      if (now-p.lastSeen > 15000) {
-        room.players.delete(token);
-        addFeed(room, `${p.name} left`);
-      }
+    room.bullets=room.bullets.filter(b=>b.life>0);
+    for(const [token,p] of room.players){
+      if(now-p.lastSeen>18000){room.players.delete(token);addFeed(room,`${p.name} left`);}
     }
-    room.killfeed = room.killfeed.filter(k=>now-k.t < 15000);
-
-    if (room.players.size===0 && now-room.lastActivity > 60000) rooms.delete(code);
+    room.feed=room.feed.filter(x=>now-x.t<16000);
+    if(room.players.size===0&&now-room.lastActivity>60000)rooms.delete(code);
   }
 },20);
 
-server.listen(PORT, ()=>console.log(`CS Lite Online running on :${PORT}`));
+server.listen(PORT,()=>console.log('CS Lite V2 on',PORT));

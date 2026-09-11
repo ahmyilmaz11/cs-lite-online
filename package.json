@@ -1,0 +1,12 @@
+{
+  "name": "cs-lite-online",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ultra-light browser multiplayer tactical shooter, no WebGL/WASM/assets.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
